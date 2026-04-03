@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="CineStats — discover trending, top rated, and upcoming movies." />
+  <meta name="theme-color" content="#0b0f17" />
+  <title>CineStats 🎬</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display:ital@0;1&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Skip to main content (accessibility) -->
+  <a href="#mainContent" class="skip-link">Skip to main content</a>
+
+  <!-- ── HEADER ──────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="header-inner">
+
+      <div class="logo" aria-label="CineStats home">
+        <span class="logo-icon" aria-hidden="true">◈</span>
+        <span class="logo-text">CineStats</span>
+      </div>
+
+      <nav class="nav-tabs" aria-label="Movie sections">
+        <button class="nav-tab active" data-section="trending" aria-pressed="true" type="button">Trending</button>
+        <button class="nav-tab" data-section="top_rated" aria-pressed="false" type="button">Top Rated</button>
+        <button class="nav-tab" data-section="upcoming" aria-pressed="false" type="button">Upcoming</button>
+        <button class="nav-tab" data-section="favourites" aria-pressed="false" type="button">❤ Favourites</button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle dark/light theme" type="button">
+          <span class="theme-icon" aria-hidden="true">☽</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ── HERO SEARCH ─────────────────────────────────── -->
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="hero-content">
+      <p class="hero-eyebrow">Discover · Explore · Remember</p>
+      <h1 class="hero-title" id="heroTitle">Your Cinema<br /><em>Universe</em></h1>
+
+      <div class="search-wrap" role="search" aria-label="Movie search">
+        <label for="searchInput" class="sr-only">Search movies</label>
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input
+          type="text"
+          id="searchInput"
+          class="search-input"
+          placeholder="Search movies, genres, years…"
+          autocomplete="off"
+        />
+        <button class="search-clear" id="searchClear" title="Clear search" aria-label="Clear search" type="button">✕</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FILTERS BAR ─────────────────────────────────── -->
+  <section class="filters-bar" aria-label="Search filters">
+    <div class="filters-inner">
+
+      <div class="filter-group">
+        <label class="filter-label" for="genreFilter">Genre</label>
+        <select id="genreFilter" class="filter-select">
+          <option value="">All Genres</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label" for="ratingFilter">Min Rating</label>
+        <select id="ratingFilter" class="filter-select">
+          <option value="">Any Rating</option>
+          <option value="9">5+ ★★★★★</option>
+          <option value="8">4+ ★★★★</option>
+          <option value="7">3+ ★★★</option>
+          <option value="6">2+ ★★</option>
+          <option value="5">1+ ★</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label" for="yearFilter">Year</label>
+        <select id="yearFilter" class="filter-select">
+          <option value="">Any Year</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label" for="sortSelect">Sort By</label>
+        <select id="sortSelect" class="filter-select">
+          <option value="default">Default</option>
+          <option value="rating_desc">Rating ↓</option>
+          <option value="rating_asc">Rating ↑</option>
+          <option value="title_asc">Title A-Z</option>
+          <option value="title_desc">Title Z-A</option>
+          <option value="date_desc">Newest First</option>
+          <option value="date_asc">Oldest First</option>
+        </select>
+      </div>
+
+      <button class="reset-btn" id="resetFilters" type="button">Reset</button>
+    </div>
+
+    <div class="results-meta" aria-live="polite">
+      <span id="resultsCount"></span>
+    </div>
+  </section>
+
+  <!-- ── MAIN MOVIE GRID ─────────────────────────────── -->
+  <main class="main-content" id="mainContent">
+
+    <!-- Loading spinner -->
+    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
+      <div class="spinner-wrap">
+        <div class="film-spinner" aria-hidden="true">
+          <div class="reel"></div>
+        </div>
+        <p class="loading-text">Fetching films…</p>
+      </div>
+    </div>
+
+    <!-- Error message -->
+    <section class="error-state hidden" id="errorState" aria-live="assertive">
+      <div class="error-icon" aria-hidden="true">⚠</div>
+      <h3>Something went wrong</h3>
+      <p id="errorMsg">Could not load movies. Please try again.</p>
+      <button class="retry-btn" id="retryBtn" type="button">Retry</button>
+    </section>
+
+    <!-- Empty state (no results) -->
+    <section class="empty-state hidden" id="emptyState" aria-live="polite">
+      <div class="empty-icon" aria-hidden="true">🎞</div>
+      <h3>No movies found</h3>
+      <p>Try adjusting your search or filters.</p>
+    </section>
+
+    <!-- The movie cards go here -->
+    <section class="movie-grid" id="movieGrid" aria-label="Movies"></section>
+
+    <!-- Pagination buttons -->
+    <nav class="pagination" id="pagination" aria-label="Pagination">
+      <button class="page-btn" id="prevPage" type="button" disabled>← Prev</button>
+      <span class="page-info" id="pageInfo" aria-live="polite"></span>
+      <button class="page-btn" id="nextPage" type="button">Next →</button>
+    </nav>
+
+  </main>
+
+  <!-- ── MOVIE DETAILS MODAL ─────────────────────────── -->
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <section class="modal" id="movieModal" role="dialog" aria-modal="true" aria-labelledby="movieModalTitle">
+      <button class="modal-close" id="modalClose" type="button" aria-label="Close movie details">✕</button>
+      <div class="modal-inner" id="modalInner"></div>
+    </section>
+  </div>
+
+  <!-- ── TOAST NOTIFICATION ─────────────────────────── -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- ── SCRIPTS ─────────────────────────────────────── -->
+  <script src="js/api.js"></script>
+  <script src="js/filters.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>
