@@ -1,226 +1,250 @@
 /* =============================================
-   app.js — Main entry point. Wires events and
-   manages the app state.
+   app.js — The main brain of the app.
+   Wires all the other files together.
    ============================================= */
 
-// ── App State ────────────────────────────────────
-// All the data the app needs to remember
-const State = {
-  section:     "trending",  // which tab is active
-  allMovies:   [],          // movies loaded from the API
-  currentPage: 1,
-  totalPages:  1,
-  searchQuery: "",
-  genre:       "",
-  minRating:   "",
-  year:        "",
-  sortBy:      "default",
-  favourites:  new Set()    // movie IDs the user saved
-};
+// ── App State ─────────────────────────────────
+// These variables remember what the user is doing right now
 
-// ── LocalStorage helpers ─────────────────────────
-const Storage = {
+var currentSection = "trending"; // which tab is active
+var allMovies = [];         // the movies loaded from the API
+var currentPage = 1;
+var totalPages = 1;
+var searchQuery = "";
+var selectedGenre = "";
+var minimumRating = "";
+var selectedYear = "";
+var sortOption = "default";
+var savedFavourites = new Set();  // a Set of movie IDs the user has saved
 
-  FAV_KEY:   "cinestats_favourites",
-  THEME_KEY: "cinestats_theme",
+// ── LocalStorage helpers ──────────────────────
+// LocalStorage lets us remember the user's favourites even after they close the tab
 
-  loadFavourites() {
-    try {
-      const saved = localStorage.getItem(this.FAV_KEY);
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch {
-      return new Set();
+var FAV_KEY = "cinestats_favourites";
+var THEME_KEY = "cinestats_theme";
+
+function loadFavouritesFromStorage() {
+  try {
+    var saved = localStorage.getItem(FAV_KEY);
+    if (saved) {
+      // JSON.parse turns the saved string back into an array, then we make it a Set
+      return new Set(JSON.parse(saved));
     }
-  },
-
-  saveFavourites(favSet) {
-    try {
-      localStorage.setItem(this.FAV_KEY, JSON.stringify([...favSet]));
-    } catch {
-      // Ignore if storage is full
-    }
-  },
-
-  loadTheme() {
-    return localStorage.getItem(this.THEME_KEY) || "dark";
-  },
-
-  saveTheme(theme) {
-    localStorage.setItem(this.THEME_KEY, theme);
+    return new Set();
+  } catch (error) {
+    // If anything goes wrong just start with an empty Set
+    return new Set();
   }
-};
+}
 
-// ── App Initialisation ───────────────────────────
+function saveFavouritesToStorage() {
+  try {
+    // We can't store a Set directly, so we spread it into an array first
+    localStorage.setItem(FAV_KEY, JSON.stringify([...savedFavourites]));
+  } catch (error) {
+    // Ignore errors (e.g. storage is full)
+  }
+}
+
+function loadThemeFromStorage() {
+  return localStorage.getItem(THEME_KEY) || "dark";
+}
+
+function saveThemeToStorage(theme) {
+  localStorage.setItem(THEME_KEY, theme);
+}
+
+// ── Start the app ─────────────────────────────
+
 async function init() {
-
-  // Apply saved theme
-  const savedTheme = Storage.loadTheme();
+  // Apply the theme the user had last time
+  var savedTheme = loadThemeFromStorage();
   document.documentElement.setAttribute("data-theme", savedTheme);
-  const themeIcon = document.querySelector(".theme-icon");
-  if (themeIcon) {
-    themeIcon.textContent = savedTheme === "dark" ? "☽" : "☀";
+  var themeIconEl = document.querySelector(".theme-icon");
+  if (themeIconEl) {
+    themeIconEl.textContent = savedTheme === "dark" ? "☽" : "☀";
   }
 
   // Restore saved favourites
-  State.favourites = Storage.loadFavourites();
+  savedFavourites = loadFavouritesFromStorage();
 
-  // Load genre list and populate the filter dropdown
+  // Load the genre list so we can populate the Genre dropdown
   try {
-    const genreData = await API.getGenres();
-    UI.setGenreMap(genreData.genres || []);
-    UI.populateGenreFilter(genreData.genres || []);
+    var genreData = await getGenres();
+    var genreList = genreData.genres || [];
+    saveGenreMap(genreList);
+    fillGenreDropdown(genreList);
   } catch (error) {
     console.warn("Could not load genres:", error.message);
   }
 
-  // Load the first batch of movies
+  // Load the first set of movies
   await loadMovies();
 
-  // Attach all event listeners
-  bindEvents();
+  // Set up all the click/change/input event listeners
+  attachEventListeners();
 }
 
-// ── Load Movies ──────────────────────────────────
+// ── Load movies from the API ──────────────────
+
 async function loadMovies() {
-  UI.showLoading();
+  showLoading();
 
   try {
-
-    // Favourites tab is handled differently
-    if (State.section === "favourites") {
-      await renderFavourites();
+    // The Favourites tab works differently from the other tabs
+    if (currentSection === "favourites") {
+      await showFavouriteMovies();
       return;
     }
 
-    let data;
+    var data;
 
-    if (State.searchQuery.trim() !== "") {
-      // User is searching
-      data = await API.searchMovies(State.searchQuery, State.currentPage);
+    if (searchQuery.trim() !== "") {
+      // The user typed something in the search box — use the search endpoint
+      data = await searchMovies(searchQuery, currentPage);
     } else {
-      // Load based on the active nav tab
-      if (State.section === "top_rated") {
-        data = await API.getTopRated(State.currentPage);
-      } else if (State.section === "upcoming") {
-        data = await API.getUpcoming(State.currentPage);
+      // Load movies based on which tab is active
+      if (currentSection === "top_rated") {
+        data = await getTopRated(currentPage);
+      } else if (currentSection === "upcoming") {
+        data = await getUpcoming(currentPage);
       } else {
-        data = await API.getTrending(State.currentPage);
+        // "trending" is the default
+        data = await getTrending(currentPage);
       }
     }
 
-    State.allMovies  = data.results || [];
-    State.totalPages = data.total_pages || 1;
+    // Save the raw movie list and page info
+    allMovies = data.results || [];
+    totalPages = data.total_pages || 1;
 
-    // Update year dropdown from the current results
-    const years = Filters.extractYears(State.allMovies);
-    UI.populateYearFilter(years);
+    // Update the Year dropdown based on what years are in the results
+    var years = getUniqueYears(allMovies);
+    fillYearDropdown(years);
 
-    renderFiltered();
+    // Apply any active filters and draw the cards
+    applyFiltersAndRender();
 
   } catch (error) {
-    UI.showError(error.message || "Failed to load movies.");
+    showError(error.message || "Failed to load movies.");
   } finally {
-    UI.hideLoading();
+    // Always hide the loading spinner, even if something went wrong
+    hideLoading();
   }
 }
 
-// ── Apply Filters & Render ───────────────────────
-function renderFiltered() {
-  // When the user searched via the API, skip re-filtering by search
-  // to avoid filtering an already-filtered result set
-  const searchForFilter = State.searchQuery.trim() ? "" : State.searchQuery;
+// ── Apply filters and draw the grid ──────────
 
-  const filtered = Filters.applyAll(State.allMovies, {
-    search:    searchForFilter,
-    genre:     State.genre,
-    minRating: State.minRating,
-    year:      State.year,
-    sortBy:    State.sortBy
+function applyFiltersAndRender() {
+  // When the user searched via the API, the results are already filtered by text
+  // so we pass an empty string to avoid double-filtering
+  var searchForFilter = searchQuery.trim() ? "" : searchQuery;
+
+  // Run all the filters and get back the filtered+sorted list
+  var filteredMovies = applyAllFilters(allMovies, {
+    search: searchForFilter,
+    genre: selectedGenre,
+    minRating: minimumRating,
+    year: selectedYear,
+    sortBy: sortOption
   });
 
-  UI.updateCount(filtered.length);
-  UI.renderGrid(filtered, State.favourites);
-  UI.updatePagination(State.currentPage, State.totalPages);
+  updateResultsCount(filteredMovies.length);
+  renderMovieGrid(filteredMovies, savedFavourites);
+  updatePagination(currentPage, totalPages);
 }
 
-// ── Render Favourites Tab ────────────────────────
-async function renderFavourites() {
-  UI.hideLoading();
+// ── Favourites tab logic ──────────────────────
 
-  if (State.favourites.size === 0) {
-    UI.updateCount(0);
-    UI.renderGrid([], State.favourites);
+async function showFavouriteMovies() {
+  hideLoading();
+
+  // If no favourites, show the grid with nothing in it
+  if (savedFavourites.size === 0) {
+    updateResultsCount(0);
+    renderMovieGrid([], savedFavourites);
     return;
   }
 
   try {
-    // Fetch details for each saved movie
-    const requests = [...State.favourites].map(id => API.getMovieDetails(id));
-    const movies   = await Promise.all(requests);
-    State.allMovies = movies;
+    // Fetch the details for every saved movie ID
+    // .map() turns each ID into a fetch Promise, then we wait for all of them
+    var fetchRequests = [...savedFavourites].map(function (movieId) {
+      return getMovieDetails(movieId);
+    });
+    var movieDetailsList = await Promise.all(fetchRequests);
 
-    const filtered = Filters.applyAll(movies, {
-      search:    State.searchQuery,
-      genre:     State.genre,
-      minRating: State.minRating,
-      year:      State.year,
-      sortBy:    State.sortBy
+    allMovies = movieDetailsList;
+
+    // Run filters on the favourites too, so genre/year/etc. still work
+    var filteredMovies = applyAllFilters(movieDetailsList, {
+      search: searchQuery,
+      genre: selectedGenre,
+      minRating: minimumRating,
+      year: selectedYear,
+      sortBy: sortOption
     });
 
-    UI.updateCount(filtered.length);
-    UI.renderGrid(filtered, State.favourites);
-    UI.updatePagination(1, 1);
+    updateResultsCount(filteredMovies.length);
+    renderMovieGrid(filteredMovies, savedFavourites);
+    updatePagination(1, 1);
 
   } catch (error) {
-    UI.showError("Could not load favourites.");
+    showError("Could not load favourites.");
   }
 }
 
-// ── Toggle Favourite ─────────────────────────────
-function toggleFavourite(movieId) {
-  const id = Number(movieId);
+// ── Add / Remove a favourite ──────────────────
 
-  if (State.favourites.has(id)) {
-    State.favourites.delete(id);
-    UI.showToast("Removed from favourites", "red");
+function toggleFavourite(movieId) {
+  var id = Number(movieId);
+
+  if (savedFavourites.has(id)) {
+    savedFavourites.delete(id);
+    showToast("Removed from favourites", "red");
   } else {
-    State.favourites.add(id);
-    UI.showToast("Added to favourites ♥", "gold");
+    savedFavourites.add(id);
+    showToast("Added to favourites ♥", "gold");
   }
 
-  Storage.saveFavourites(State.favourites);
+  // Save the updated list to localStorage
+  saveFavouritesToStorage();
 
-  // If we're on the favourites tab, reload the list
-  if (State.section === "favourites") {
+  // If we're on the Favourites tab, reload the whole list
+  if (currentSection === "favourites") {
     loadMovies();
     return;
   }
 
-  // Otherwise just update the heart button on any visible cards
-  document.querySelectorAll('.fav-btn[data-id="' + id + '"]').forEach(function(btn) {
-    const isFav = State.favourites.has(id);
-    btn.className = "fav-btn " + (isFav ? "active" : "");
-    btn.textContent = isFav ? "♥" : "♡";
-    btn.title = isFav ? "Remove from favourites" : "Add to favourites";
+  // Otherwise, just update the heart button on visible cards
+  var heartButtons = document.querySelectorAll('.fav-btn[data-id="' + id + '"]');
+  heartButtons.forEach(function (btn) {
+    var isNowFav = savedFavourites.has(id);
+    btn.className = "fav-btn " + (isNowFav ? "active" : "");
+    btn.textContent = isNowFav ? "♥" : "♡";
+    btn.title = isNowFav ? "Remove from favourites" : "Add to favourites";
   });
 
-  // Also update the button inside the modal if it's open
-  const modalFavBtn = document.querySelector('.modal-fav-btn[data-id="' + id + '"]');
+  // Also update the button inside the detail modal if it's open
+  var modalFavBtn = document.querySelector('.modal-fav-btn[data-id="' + id + '"]');
   if (modalFavBtn) {
-    const isFav = State.favourites.has(id);
-    modalFavBtn.className = "modal-fav-btn " + (isFav ? "remove" : "");
-    modalFavBtn.textContent = isFav ? "♥ Remove from Favourites" : "♡ Add to Favourites";
+    var isNowFav = savedFavourites.has(id);
+    modalFavBtn.className = "modal-fav-btn " + (isNowFav ? "remove" : "");
+    modalFavBtn.textContent = isNowFav ? "♥ Remove from Favourites" : "♡ Add to Favourites";
   }
 }
 
-// ── Debounced Search Handler ─────────────────────
-const debouncedSearch = Filters.debounce(async function(query) {
-  State.searchQuery = query;
-  State.currentPage = 1;
+// ── Search input with debounce ────────────────
 
-  // Show/hide the X clear button
-  const clearBtn = document.getElementById("searchClear");
-  if (query.length > 0) {
+// We wrap the search handler in a debounce so it waits for the user to
+// stop typing before calling the API (avoids tons of rapid requests)
+var handleSearchInput = makeDebounced(async function (typedText) {
+  searchQuery = typedText;
+  currentPage = 1;
+
+  // Show or hide the X clear button
+  var clearBtn = document.getElementById("searchClear");
+  if (typedText.length > 0) {
     clearBtn.classList.add("visible");
   } else {
     clearBtn.classList.remove("visible");
@@ -229,182 +253,187 @@ const debouncedSearch = Filters.debounce(async function(query) {
   await loadMovies();
 }, 400);
 
-// ── Event Listeners ──────────────────────────────
-function bindEvents() {
+// ── Attach all event listeners ────────────────
 
-  // Nav tabs
-  document.querySelectorAll(".nav-tab").forEach(function(tab) {
-    tab.addEventListener("click", async function() {
-      // Deactivate all tabs
-      document.querySelectorAll(".nav-tab").forEach(function(t) {
+function attachEventListeners() {
+
+  // ─ Nav tabs ─
+  var allTabs = document.querySelectorAll(".nav-tab");
+  allTabs.forEach(function (tab) {
+    tab.addEventListener("click", async function () {
+
+      // Deactivate every tab
+      allTabs.forEach(function (t) {
         t.classList.remove("active");
         t.setAttribute("aria-pressed", "false");
       });
 
-      // Activate clicked tab
+      // Activate the one that was clicked
       tab.classList.add("active");
       tab.setAttribute("aria-pressed", "true");
 
-      State.section     = tab.dataset.section;
-      State.currentPage = 1;
+      currentSection = tab.dataset.section;
+      currentPage = 1;
       await loadMovies();
     });
   });
 
-  // Search input
-  document.getElementById("searchInput").addEventListener("input", function(e) {
-    debouncedSearch(e.target.value);
+  // ─ Search box ─
+  document.getElementById("searchInput").addEventListener("input", function (event) {
+    handleSearchInput(event.target.value);
   });
 
-  // Clear search button
-  document.getElementById("searchClear").addEventListener("click", function() {
+  // ─ Clear search button (the × icon) ─
+  document.getElementById("searchClear").addEventListener("click", function () {
     document.getElementById("searchInput").value = "";
-    debouncedSearch("");
+    handleSearchInput("");
   });
 
-  // Genre filter
-  document.getElementById("genreFilter").addEventListener("change", function(e) {
-    State.genre       = e.target.value;
-    State.currentPage = 1;
-    renderFiltered();
+  // ─ Genre dropdown ─
+  document.getElementById("genreFilter").addEventListener("change", function (event) {
+    selectedGenre = event.target.value;
+    currentPage = 1;
+    applyFiltersAndRender();
   });
 
-  // Rating filter
-  document.getElementById("ratingFilter").addEventListener("change", function(e) {
-    State.minRating   = e.target.value;
-    State.currentPage = 1;
-    renderFiltered();
+  // ─ Rating dropdown ─
+  document.getElementById("ratingFilter").addEventListener("change", function (event) {
+    minimumRating = event.target.value;
+    currentPage = 1;
+    applyFiltersAndRender();
   });
 
-  // Year filter
-  document.getElementById("yearFilter").addEventListener("change", function(e) {
-    State.year        = e.target.value;
-    State.currentPage = 1;
-    renderFiltered();
+  // ─ Year dropdown ─
+  document.getElementById("yearFilter").addEventListener("change", function (event) {
+    selectedYear = event.target.value;
+    currentPage = 1;
+    applyFiltersAndRender();
   });
 
-  // Sort dropdown
-  document.getElementById("sortSelect").addEventListener("change", function(e) {
-    State.sortBy = e.target.value;
-    renderFiltered();
+  // ─ Sort dropdown ─
+  document.getElementById("sortSelect").addEventListener("change", function (event) {
+    sortOption = event.target.value;
+    applyFiltersAndRender();
   });
 
-  // Reset all filters button
-  document.getElementById("resetFilters").addEventListener("click", function() {
-    State.searchQuery = "";
-    State.genre       = "";
-    State.minRating   = "";
-    State.year        = "";
-    State.sortBy      = "default";
-    State.currentPage = 1;
+  // ─ Reset button ─
+  document.getElementById("resetFilters").addEventListener("click", function () {
+    // Reset all state variables
+    searchQuery = "";
+    selectedGenre = "";
+    minimumRating = "";
+    selectedYear = "";
+    sortOption = "default";
+    currentPage = 1;
 
-    document.getElementById("searchInput").value  = "";
-    document.getElementById("genreFilter").value  = "";
+    // Reset all the form elements to show their default values
+    document.getElementById("searchInput").value = "";
+    document.getElementById("genreFilter").value = "";
     document.getElementById("ratingFilter").value = "";
-    document.getElementById("yearFilter").value   = "";
-    document.getElementById("sortSelect").value   = "default";
+    document.getElementById("yearFilter").value = "";
+    document.getElementById("sortSelect").value = "default";
     document.getElementById("searchClear").classList.remove("visible");
 
     loadMovies();
   });
 
-  // Pagination — previous page
-  document.getElementById("prevPage").addEventListener("click", async function() {
-    if (State.currentPage > 1) {
-      State.currentPage--;
+  // ─ Pagination: previous page ─
+  document.getElementById("prevPage").addEventListener("click", async function () {
+    if (currentPage > 1) {
+      currentPage--;
       await loadMovies();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   });
 
-  // Pagination — next page
-  document.getElementById("nextPage").addEventListener("click", async function() {
-    if (State.currentPage < State.totalPages) {
-      State.currentPage++;
+  // ─ Pagination: next page ─
+  document.getElementById("nextPage").addEventListener("click", async function () {
+    if (currentPage < totalPages) {
+      currentPage++;
       await loadMovies();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   });
 
-  // Movie grid — click delegation
-  document.getElementById("movieGrid").addEventListener("click", function(e) {
+  // ─ Movie grid clicks (using event delegation) ─
+  // Instead of attaching a listener to every card, we attach one to the grid
+  // and check what was actually clicked
+  document.getElementById("movieGrid").addEventListener("click", function (event) {
 
-    // If the heart button was clicked
-    const favBtn = e.target.closest(".fav-btn");
-    if (favBtn) {
-      e.stopPropagation();
-      toggleFavourite(favBtn.dataset.id);
+    // Check if the heart button was clicked
+    var favButton = event.target.closest(".fav-btn");
+    if (favButton) {
+      event.stopPropagation(); // don't let it also trigger the card click
+      toggleFavourite(favButton.dataset.id);
       return;
     }
 
-    // If the card itself was clicked
-    const card = e.target.closest(".movie-card");
-    if (card) {
-      UI.showModal(card.dataset.id, State.favourites);
+    // Check if the card itself was clicked
+    var movieCard = event.target.closest(".movie-card");
+    if (movieCard) {
+      openMovieModal(movieCard.dataset.id, savedFavourites);
     }
   });
 
-  // Close modal button
-  document.getElementById("modalClose").addEventListener("click", function() {
-    UI.closeModal();
+  // ─ Close modal button ─
+  document.getElementById("modalClose").addEventListener("click", function () {
+    closeMovieModal();
   });
 
-  // Click on the dark backdrop to close modal
-  document.getElementById("modalBackdrop").addEventListener("click", function(e) {
-    if (e.target === document.getElementById("modalBackdrop")) {
-      UI.closeModal();
+  // ─ Click on the dark backdrop to close modal ─
+  document.getElementById("modalBackdrop").addEventListener("click", function (event) {
+    if (event.target === document.getElementById("modalBackdrop")) {
+      closeMovieModal();
     }
   });
 
-  // Favourite button inside the modal
-  document.getElementById("movieModal").addEventListener("click", function(e) {
-    const favBtn = e.target.closest(".modal-fav-btn");
+  // ─ Favourite button inside the modal ─
+  document.getElementById("movieModal").addEventListener("click", function (event) {
+    var favBtn = event.target.closest(".modal-fav-btn");
     if (favBtn) {
       toggleFavourite(favBtn.dataset.id);
     }
   });
 
-  // Press Escape to close modal
-  document.addEventListener("keydown", function(e) {
-    if (e.key === "Escape") {
-      UI.closeModal();
+  // ─ Press Escape key to close the modal ─
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      closeMovieModal();
     }
   });
 
-  // Basic focus trap: keep Tab key inside the modal
-  const modal = document.getElementById("movieModal");
-  const focusableSelectors = "button, [href], input, select, textarea";
+  // ─ Basic focus trap: keep Tab key inside the modal ─
+  var modalEl = document.getElementById("movieModal");
+  document.addEventListener("keydown", function (event) {
+    var isOpen = !document.getElementById("modalBackdrop").classList.contains("hidden");
+    if (!isOpen || event.key !== "Tab") return;
 
-  document.addEventListener("keydown", function(e) {
-    const isModalOpen = !document.getElementById("modalBackdrop").classList.contains("hidden");
-    if (!isModalOpen || e.key !== "Tab") return;
+    var focusable = Array.from(modalEl.querySelectorAll("button, [href], input, select, textarea"));
+    var firstEl = focusable[0];
+    var lastEl = focusable[focusable.length - 1];
 
-    const focusable = Array.from(modal.querySelectorAll(focusableSelectors));
-    const first = focusable[0];
-    const last  = focusable[focusable.length - 1];
-
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
+    if (event.shiftKey && document.activeElement === firstEl) {
+      event.preventDefault();
+      lastEl.focus();
+    } else if (!event.shiftKey && document.activeElement === lastEl) {
+      event.preventDefault();
+      firstEl.focus();
     }
   });
 
-  // Retry button on error screen
+  // ─ Retry button on the error screen ─
   document.getElementById("retryBtn").addEventListener("click", loadMovies);
 
-  // Theme toggle button
-  document.getElementById("themeToggle").addEventListener("click", function() {
-    const current = document.documentElement.getAttribute("data-theme");
-    const next    = current === "dark" ? "light" : "dark";
+  // ─ Theme toggle button ─
+  document.getElementById("themeToggle").addEventListener("click", function () {
+    var currentTheme = document.documentElement.getAttribute("data-theme");
+    var newTheme = currentTheme === "dark" ? "light" : "dark";
 
-    document.documentElement.setAttribute("data-theme", next);
-    document.querySelector(".theme-icon").textContent = next === "dark" ? "☽" : "☀";
-    Storage.saveTheme(next);
+    document.documentElement.setAttribute("data-theme", newTheme);
+    document.querySelector(".theme-icon").textContent = newTheme === "dark" ? "☽" : "☀";
+    saveThemeToStorage(newTheme);
   });
 }
 
-// ── Start the App ────────────────────────────────
+// ── Run init when the page is ready ──────────
 document.addEventListener("DOMContentLoaded", init);
